@@ -1,0 +1,5 @@
+# Runtime dependencies for the local run (PySpark + Delta Lake).
+# On Databricks these are already part of the runtime.
+pyspark>=3.5.3,<3.6
+delta-spark>=3.2,<3.4
+requests>=2.31

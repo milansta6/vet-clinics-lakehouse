@@ -1,0 +1,35 @@
+# Databricks Asset Bundle: deploys the notebooks, the shared Python package (src/)
+# and one Workflow job. Works with Databricks Free Edition (serverless compute).
+#
+#   databricks bundle validate
+#   databricks bundle deploy
+#   databricks bundle run vet_lakehouse_pipeline
+#
+# The workspace is taken from your Databricks CLI profile (`databricks auth login`),
+# so no workspace URL is stored in this repo.
+bundle:
+  name: vet-clinics-lakehouse
+
+include:
+  - resources/*.yml
+
+variables:
+  catalog:
+    description: Unity Catalog catalog for all tables (Free Edition default is "workspace").
+    default: workspace
+  schema_prefix:
+    description: Prefix of the four schemas (<prefix>_bronze, _silver, _gold, _dq).
+    default: vet
+  days:
+    description: Number of daily source files to generate.
+    default: "59"
+
+targets:
+  dev:
+    mode: development
+    default: true
+
+  # Example of a second environment: same code, different schemas.
+  prod:
+    variables:
+      schema_prefix: vet_prod

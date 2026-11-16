@@ -1,0 +1,3 @@
+# Keep LF line endings on every OS (the Makefile and Docker build need them).
+* text=auto eol=lf
+*.png binary

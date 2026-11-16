@@ -1,0 +1,10 @@
+.git
+.lakehouse
+.venv
+venv
+**/__pycache__
+.pytest_cache
+.ruff_cache
+*.egg-info
+infra/.terraform
+.databricks

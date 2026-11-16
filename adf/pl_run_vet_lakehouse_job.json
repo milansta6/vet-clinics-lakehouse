@@ -1,0 +1,213 @@
+{
+  "name": "pl_run_vet_lakehouse_job",
+  "properties": {
+    "description": "TEMPLATE. Starts the Databricks Workflow job 'vet-clinics-lakehouse-pipeline' through the Jobs REST API, waits until it finishes and fails the pipeline if the job failed. Authentication uses the managed identity of the data factory (no secrets).",
+    "parameters": {
+      "databricksWorkspaceUrl": {
+        "type": "string",
+        "defaultValue": "https://adb-0000000000000000.0.azuredatabricks.net"
+      },
+      "databricksJobId": {
+        "type": "string",
+        "defaultValue": "000000000000000"
+      },
+      "catalog": {
+        "type": "string",
+        "defaultValue": "workspace"
+      },
+      "schemaPrefix": {
+        "type": "string",
+        "defaultValue": "vet"
+      },
+      "pollIntervalSeconds": {
+        "type": "int",
+        "defaultValue": 60
+      }
+    },
+    "variables": {
+      "runId": {
+        "type": "String"
+      },
+      "lifeCycleState": {
+        "type": "String",
+        "defaultValue": "PENDING"
+      },
+      "resultState": {
+        "type": "String",
+        "defaultValue": ""
+      }
+    },
+    "activities": [
+      {
+        "name": "Start Databricks job",
+        "description": "POST /api/2.1/jobs/run-now",
+        "type": "WebActivity",
+        "dependsOn": [],
+        "policy": {
+          "timeout": "0.00:05:00",
+          "retry": 2,
+          "retryIntervalInSeconds": 60,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "typeProperties": {
+          "url": {
+            "value": "@concat(pipeline().parameters.databricksWorkspaceUrl, '/api/2.1/jobs/run-now')",
+            "type": "Expression"
+          },
+          "method": "POST",
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "body": {
+            "value": "@json(concat('{\"job_id\": ', pipeline().parameters.databricksJobId, ', \"idempotency_token\": \"', pipeline().RunId, '\", \"job_parameters\": {\"catalog\": \"', pipeline().parameters.catalog, '\", \"schema_prefix\": \"', pipeline().parameters.schemaPrefix, '\"}}'))",
+            "type": "Expression"
+          },
+          "authentication": {
+            "type": "MSI",
+            "resource": "2ff814a6-3304-4ab8-85cb-cd0e6f879c1d"
+          }
+        }
+      },
+      {
+        "name": "Remember run id",
+        "type": "SetVariable",
+        "dependsOn": [
+          {
+            "activity": "Start Databricks job",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "typeProperties": {
+          "variableName": "runId",
+          "value": {
+            "value": "@string(activity('Start Databricks job').output.run_id)",
+            "type": "Expression"
+          }
+        }
+      },
+      {
+        "name": "Wait for job run",
+        "description": "Poll GET /api/2.1/jobs/runs/get until the run is finished.",
+        "type": "Until",
+        "dependsOn": [
+          {
+            "activity": "Remember run id",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "typeProperties": {
+          "expression": {
+            "value": "@contains(createArray('TERMINATED', 'SKIPPED', 'INTERNAL_ERROR'), variables('lifeCycleState'))",
+            "type": "Expression"
+          },
+          "timeout": "0.02:00:00",
+          "activities": [
+            {
+              "name": "Wait before polling",
+              "type": "Wait",
+              "dependsOn": [],
+              "typeProperties": {
+                "waitTimeInSeconds": {
+                  "value": "@pipeline().parameters.pollIntervalSeconds",
+                  "type": "Expression"
+                }
+              }
+            },
+            {
+              "name": "Get run status",
+              "type": "WebActivity",
+              "dependsOn": [
+                {
+                  "activity": "Wait before polling",
+                  "dependencyConditions": ["Succeeded"]
+                }
+              ],
+              "policy": {
+                "timeout": "0.00:05:00",
+                "retry": 3,
+                "retryIntervalInSeconds": 30
+              },
+              "typeProperties": {
+                "url": {
+                  "value": "@concat(pipeline().parameters.databricksWorkspaceUrl, '/api/2.1/jobs/runs/get?run_id=', variables('runId'))",
+                  "type": "Expression"
+                },
+                "method": "GET",
+                "authentication": {
+                  "type": "MSI",
+                  "resource": "2ff814a6-3304-4ab8-85cb-cd0e6f879c1d"
+                }
+              }
+            },
+            {
+              "name": "Set life cycle state",
+              "type": "SetVariable",
+              "dependsOn": [
+                {
+                  "activity": "Get run status",
+                  "dependencyConditions": ["Succeeded"]
+                }
+              ],
+              "typeProperties": {
+                "variableName": "lifeCycleState",
+                "value": {
+                  "value": "@activity('Get run status').output.state.life_cycle_state",
+                  "type": "Expression"
+                }
+              }
+            },
+            {
+              "name": "Set result state",
+              "type": "SetVariable",
+              "dependsOn": [
+                {
+                  "activity": "Get run status",
+                  "dependencyConditions": ["Succeeded"]
+                }
+              ],
+              "typeProperties": {
+                "variableName": "resultState",
+                "value": {
+                  "value": "@coalesce(activity('Get run status').output.state?.result_state, '')",
+                  "type": "Expression"
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "Job succeeded",
+        "type": "IfCondition",
+        "dependsOn": [
+          {
+            "activity": "Wait for job run",
+            "dependencyConditions": ["Completed"]
+          }
+        ],
+        "typeProperties": {
+          "expression": {
+            "value": "@equals(variables('resultState'), 'SUCCESS')",
+            "type": "Expression"
+          },
+          "ifFalseActivities": [
+            {
+              "name": "Fail pipeline",
+              "type": "Fail",
+              "dependsOn": [],
+              "typeProperties": {
+                "message": {
+                  "value": "@concat('Databricks job run ', variables('runId'), ' ended with life cycle state ', variables('lifeCycleState'), ' and result state ', variables('resultState'))",
+                  "type": "Expression"
+                },
+                "errorCode": "DatabricksJobFailed"
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "annotations": ["template", "vet-clinics-lakehouse"]
+  }
+}

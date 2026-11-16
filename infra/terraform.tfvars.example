@@ -1,0 +1,11 @@
+# Copy to terraform.tfvars and fill in. terraform.tfvars is ignored by git.
+subscription_id          = "00000000-0000-0000-0000-000000000000"
+project                  = "vetlake"
+environment              = "dev"
+location                 = "westeurope"
+storage_replication_type = "LRS"
+
+tags = {
+  owner       = "data-engineering"
+  cost_center = "demo"
+}
